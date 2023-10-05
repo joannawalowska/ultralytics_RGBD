@@ -3,6 +3,7 @@
 import ast
 import contextlib
 import json
+import os
 import platform
 import zipfile
 from collections import OrderedDict, namedtuple
@@ -18,6 +19,7 @@ from PIL import Image
 from ultralytics.utils import ARM64, LINUX, LOGGER, ROOT, yaml_load
 from ultralytics.utils.checks import check_requirements, check_suffix, check_version, check_yaml
 from ultralytics.utils.downloads import attempt_download_asset, is_url
+from ultralytics.utils.ops import xywh2xyxy
 
 
 def check_class_names(names):
@@ -39,7 +41,6 @@ def check_class_names(names):
 
 class AutoBackend(nn.Module):
 
-    @torch.no_grad()
     def __init__(self,
                  weights='yolov8n.pt',
                  device=torch.device('cpu'),
@@ -68,7 +69,7 @@ class AutoBackend(nn.Module):
             | ONNX Runtime          | *.onnx           |
             | ONNX OpenCV DNN       | *.onnx dnn=True  |
             | OpenVINO              | *.xml            |
-            | CoreML                | *.mlpackage      |
+            | CoreML                | *.mlmodel        |
             | TensorRT              | *.engine         |
             | TensorFlow SavedModel | *_saved_model    |
             | TensorFlow GraphDef   | *.pb             |
@@ -263,9 +264,10 @@ class AutoBackend(nn.Module):
             metadata = w.parents[1] / 'metadata.yaml'
         elif ncnn:  # ncnn
             LOGGER.info(f'Loading {w} for ncnn inference...')
-            check_requirements('git+https://github.com/Tencent/ncnn.git' if ARM64 else 'ncnn')  # requires ncnn
+            check_requirements('git+https://github.com/Tencent/ncnn.git' if ARM64 else 'ncnn')  # requires NCNN
             import ncnn as pyncnn
             net = pyncnn.Net()
+            net.opt.num_threads = os.cpu_count()
             net.opt.use_vulkan_compute = cuda
             w = Path(w)
             if not w.is_file():  # if not *.param
@@ -310,11 +312,6 @@ class AutoBackend(nn.Module):
             names = self._apply_default_class_names(data)
         names = check_class_names(names)
 
-        # Disable gradients
-        if pt:
-            for p in model.parameters():
-                p.requires_grad = False
-
         self.__dict__.update(locals())  # assign all variables to self
 
     def forward(self, im, augment=False, visualize=False):
@@ -330,6 +327,7 @@ class AutoBackend(nn.Module):
             (tuple): Tuple containing the raw output tensor, and processed output for visualization (if visualize=True)
         """
         b, ch, h, w = im.shape  # batch, channel, height, width
+        
         if self.fp16 and im.dtype != torch.float16:
             im = im.half()  # to FP16
         if self.nhwc:
@@ -368,13 +366,9 @@ class AutoBackend(nn.Module):
             # im = im.resize((192, 320), Image.BILINEAR)
             y = self.model.predict({'image': im_pil})  # coordinates are xywh normalized
             if 'confidence' in y:
-                raise TypeError('Ultralytics only supports inference of non-pipelined CoreML models exported with '
-                                f"'nms=False', but 'model={w}' has an NMS pipeline created by an 'nms=True' export.")
-                # TODO: CoreML NMS inference handling
-                # from ultralytics.utils.ops import xywh2xyxy
-                # box = xywh2xyxy(y['coordinates'] * [[w, h, w, h]])  # xyxy pixels
-                # conf, cls = y['confidence'].max(1), y['confidence'].argmax(1).astype(np.float32)
-                # y = np.concatenate((box, conf.reshape(-1, 1), cls.reshape(-1, 1)), 1)
+                box = xywh2xyxy(y['coordinates'] * [[w, h, w, h]])  # xyxy pixels
+                conf, cls = y['confidence'].max(1), y['confidence'].argmax(1).astype(np.float)
+                y = np.concatenate((box, conf.reshape(-1, 1), cls.reshape(-1, 1)), 1)
             elif len(y) == 1:  # classification model
                 y = list(y.values())
             elif len(y) == 2:  # segmentation model
@@ -409,24 +403,19 @@ class AutoBackend(nn.Module):
                     nc = y[ib].shape[1] - y[ip].shape[3] - 4  # y = (1, 160, 160, 32), (1, 116, 8400)
                     self.names = {i: f'class{i}' for i in range(nc)}
             else:  # Lite or Edge TPU
-                details = self.input_details[0]
-                integer = details['dtype'] in (np.int8, np.int16)  # is TFLite quantized int8 or int16 model
-                if integer:
-                    scale, zero_point = details['quantization']
-                    im = (im / scale + zero_point).astype(details['dtype'])  # de-scale
-                self.interpreter.set_tensor(details['index'], im)
+                input = self.input_details[0]
+                int8 = input['dtype'] == np.int8  # is TFLite quantized int8 model
+                if int8:
+                    scale, zero_point = input['quantization']
+                    im = (im / scale + zero_point).astype(np.int8)  # de-scale
+                self.interpreter.set_tensor(input['index'], im)
                 self.interpreter.invoke()
                 y = []
                 for output in self.output_details:
                     x = self.interpreter.get_tensor(output['index'])
-                    if integer:
+                    if int8:
                         scale, zero_point = output['quantization']
                         x = (x.astype(np.float32) - zero_point) * scale  # re-scale
-                    if x.ndim > 2:  # if task is not classification
-                        # Denormalize xywh by image size. See https://github.com/ultralytics/ultralytics/pull/1695
-                        # xywh are normalized in TFLite/EdgeTPU to mitigate quantization error of integer models
-                        x[:, [0, 2]] *= w
-                        x[:, [1, 3]] *= h
                     y.append(x)
             # TF segment fixes: export is reversed vs ONNX export and protos are transposed
             if len(y) == 2:  # segment with (det, proto) output order reversed
@@ -434,6 +423,7 @@ class AutoBackend(nn.Module):
                     y = list(reversed(y))  # should be y = (1, 116, 8400), (1, 160, 160, 32)
                 y[1] = np.transpose(y[1], (0, 3, 1, 2))  # should be y = (1, 116, 8400), (1, 32, 160, 160)
             y = [x if isinstance(x, np.ndarray) else x.numpy() for x in y]
+            # y[0][..., :4] *= [w, h, w, h]  # xywh normalized to pixels
 
         # for x in y:
         #     print(type(x), len(x)) if isinstance(x, (list, tuple)) else print(type(x), x.shape)  # debug shapes
@@ -454,7 +444,7 @@ class AutoBackend(nn.Module):
          """
         return torch.tensor(x).to(self.device) if isinstance(x, np.ndarray) else x
 
-    def warmup(self, imgsz=(1, 3, 640, 640)):
+    def warmup(self, imgsz=(1, 4, 640, 640)):
         """
         Warm up the model by running one forward pass with a dummy input.
 
@@ -491,13 +481,8 @@ class AutoBackend(nn.Module):
         sf = list(export_formats().Suffix)  # export suffixes
         if not is_url(p, check=False) and not isinstance(p, str):
             check_suffix(p, sf)  # checks
-        name = Path(p).name
-        types = [s in name for s in sf]
-        types[5] |= name.endswith('.mlmodel')  # retain support for older Apple CoreML *.mlmodel formats
+        url = urlparse(p)  # if url may be Triton inference server
+        types = [s in Path(p).name for s in sf]
         types[8] &= not types[9]  # tflite &= not edgetpu
-        if any(types):
-            triton = False
-        else:
-            url = urlparse(p)  # if url may be Triton inference server
-            triton = all([any(s in url.scheme for s in ['http', 'grpc']), url.netloc])
+        triton = not any(types) and all([any(s in url.scheme for s in ['http', 'grpc']), url.netloc])
         return types + [triton]

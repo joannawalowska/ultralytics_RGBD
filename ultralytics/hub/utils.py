@@ -9,15 +9,14 @@ import time
 from pathlib import Path
 
 import requests
+from tqdm import tqdm
 
-from ultralytics.utils import (ENVIRONMENT, LOGGER, ONLINE, RANK, SETTINGS, TESTS_RUNNING, TQDM, TryExcept, __version__,
-                               colorstr, get_git_origin_url, is_colab, is_git_dir, is_pip_package)
-from ultralytics.utils.downloads import GITHUB_ASSETS_NAMES
+from ultralytics.utils import (ENVIRONMENT, LOGGER, ONLINE, RANK, SETTINGS, TESTS_RUNNING, TQDM_BAR_FORMAT, TryExcept,
+                               __version__, colorstr, get_git_origin_url, is_colab, is_git_dir, is_pip_package)
 
 PREFIX = colorstr('Ultralytics HUB: ')
 HELP_MSG = 'If this issue persists please visit https://github.com/ultralytics/hub/issues for assistance.'
 HUB_API_ROOT = os.environ.get('ULTRALYTICS_HUB_API', 'https://api.ultralytics.com')
-HUB_WEB_ROOT = os.environ.get('ULTRALYTICS_HUB_WEB', 'https://hub.ultralytics.com')
 
 
 def request_with_credentials(url: str) -> any:
@@ -70,17 +69,16 @@ def requests_with_progress(method, url, **kwargs):
         (requests.Response): The response object from the HTTP request.
 
     Note:
-        - If 'progress' is set to True, the progress bar will display the download progress for responses with a known
-        content length.
-        - If 'progress' is a number then progress bar will display assuming content length = progress.
+        If 'progress' is set to True, the progress bar will display the download progress
+        for responses with a known content length.
     """
     progress = kwargs.pop('progress', False)
     if not progress:
         return requests.request(method, url, **kwargs)
     response = requests.request(method, url, stream=True, **kwargs)
-    total = int(response.headers.get('content-length', 0) if isinstance(progress, bool) else progress)  # total size
+    total = int(response.headers.get('content-length', 0))  # total size
     try:
-        pbar = TQDM(total=total, unit='B', unit_scale=True, unit_divisor=1024)
+        pbar = tqdm(total=total, unit='B', unit_scale=True, unit_divisor=1024, bar_format=TQDM_BAR_FORMAT)
         for data in response.iter_content(chunk_size=1024):
             pbar.update(len(data))
         pbar.close()
@@ -195,9 +193,7 @@ class Events:
 
         # Attempt to add to events
         if len(self.events) < 25:  # Events list limited to 25 events (drop any events past this)
-            params = {
-                **self.metadata, 'task': cfg.task,
-                'model': cfg.model if cfg.model in GITHUB_ASSETS_NAMES else 'custom'}
+            params = {**self.metadata, **{'task': cfg.task}}
             if cfg.mode == 'export':
                 params['format'] = cfg.format
             self.events.append({'name': cfg.mode, 'params': params})

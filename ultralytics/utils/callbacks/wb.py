@@ -1,25 +1,22 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
-
-from ultralytics.utils import SETTINGS, TESTS_RUNNING
+from ultralytics.utils import TESTS_RUNNING
 from ultralytics.utils.torch_utils import model_info_for_loggers
 
 try:
-    assert not TESTS_RUNNING  # do not log pytest
-    assert SETTINGS['wandb'] is True  # verify integration is enabled
     import wandb as wb
 
     assert hasattr(wb, '__version__')
-
-    _processed_plots = {}
-
+    assert not TESTS_RUNNING  # do not log pytest
 except (ImportError, AssertionError):
     wb = None
+
+_processed_plots = {}
 
 
 def _log_plots(plots, step):
     for name, params in plots.items():
         timestamp = params['timestamp']
-        if _processed_plots.get(name) != timestamp:
+        if _processed_plots.get(name, None) != timestamp:
             wb.run.log({name.stem: wb.Image(str(name))}, step=step)
             _processed_plots[name] = timestamp
 
@@ -54,7 +51,6 @@ def on_train_end(trainer):
     if trainer.best.exists():
         art.add_file(trainer.best)
         wb.run.log_artifact(art, aliases=['best'])
-    wb.run.finish()  # required or run continues on dashboard
 
 
 callbacks = {

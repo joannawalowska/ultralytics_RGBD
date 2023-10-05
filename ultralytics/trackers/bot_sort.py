@@ -110,7 +110,8 @@ class BOTSORT(BYTETracker):
         if args.with_reid:
             # Haven't supported BoT-SORT(reid) yet
             self.encoder = None
-        self.gmc = GMC(method=args.gmc_method)
+        # self.gmc = GMC(method=args.cmc_method, verbose=[args.name, args.ablation])
+        self.gmc = GMC(method=args.cmc_method)
 
     def get_kalmanfilter(self):
         """Returns an instance of KalmanFilterXYWH for object tracking."""

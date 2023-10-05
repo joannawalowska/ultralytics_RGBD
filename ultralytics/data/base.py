@@ -13,8 +13,9 @@ import cv2
 import numpy as np
 import psutil
 from torch.utils.data import Dataset
+from tqdm import tqdm
 
-from ultralytics.utils import DEFAULT_CFG, LOCAL_RANK, LOGGER, NUM_THREADS, TQDM
+from ultralytics.utils import DEFAULT_CFG, LOCAL_RANK, LOGGER, NUM_THREADS, TQDM_BAR_FORMAT
 
 from .utils import HELP_URL, IMG_FORMATS
 
@@ -114,7 +115,7 @@ class BaseDataset(Dataset):
                     raise FileNotFoundError(f'{self.prefix}{p} does not exist')
             im_files = sorted(x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in IMG_FORMATS)
             # self.img_files = sorted([x for x in f if x.suffix[1:].lower() in IMG_FORMATS])  # pathlib
-            assert im_files, f'{self.prefix}No images found in {img_path}'
+            assert im_files, f'{self.prefix}No images found'
         except Exception as e:
             raise FileNotFoundError(f'{self.prefix}Error loading data from {img_path}\n{HELP_URL}') from e
         if self.fraction < 1:
@@ -140,24 +141,22 @@ class BaseDataset(Dataset):
             if self.single_cls:
                 self.labels[i]['cls'][:, 0] = 0
 
-    def load_image(self, i, rect_mode=True):
+    def load_image(self, i):
         """Loads 1 image from dataset index 'i', returns (im, resized hw)."""
         im, f, fn = self.ims[i], self.im_files[i], self.npy_files[i]
         if im is None:  # not cached in RAM
             if fn.exists():  # load npy
                 im = np.load(fn)
             else:  # read image
-                im = cv2.imread(f)  # BGR
+                im = cv2.imread(f,cv2.IMREAD_UNCHANGED)  # BGR
                 if im is None:
                     raise FileNotFoundError(f'Image Not Found {f}')
             h0, w0 = im.shape[:2]  # orig hw
-            if rect_mode:  # resize long side to imgsz while maintaining aspect ratio
-                r = self.imgsz / max(h0, w0)  # ratio
-                if r != 1:  # if sizes are not equal
-                    w, h = (min(math.ceil(w0 * r), self.imgsz), min(math.ceil(h0 * r), self.imgsz))
-                    im = cv2.resize(im, (w, h), interpolation=cv2.INTER_LINEAR)
-            elif not (h0 == w0 == self.imgsz):  # resize by stretching image to square imgsz
-                im = cv2.resize(im, (self.imgsz, self.imgsz), interpolation=cv2.INTER_LINEAR)
+            r = self.imgsz / max(h0, w0)  # ratio
+            if r != 1:  # if sizes are not equal
+                interp = cv2.INTER_LINEAR if (self.augment or r > 1) else cv2.INTER_AREA
+                im = cv2.resize(im, (min(math.ceil(w0 * r), self.imgsz), min(math.ceil(h0 * r), self.imgsz)),
+                                interpolation=interp)
 
             # Add to buffer if training with augmentations
             if self.augment:
@@ -177,7 +176,7 @@ class BaseDataset(Dataset):
         fcn = self.cache_images_to_disk if cache == 'disk' else self.load_image
         with ThreadPool(NUM_THREADS) as pool:
             results = pool.imap(fcn, range(self.ni))
-            pbar = TQDM(enumerate(results), total=self.ni, disable=LOCAL_RANK > 0)
+            pbar = tqdm(enumerate(results), total=self.ni, bar_format=TQDM_BAR_FORMAT, disable=LOCAL_RANK > 0)
             for i, x in pbar:
                 if cache == 'disk':
                     b += self.npy_files[i].stat().st_size
@@ -191,14 +190,14 @@ class BaseDataset(Dataset):
         """Saves an image as an *.npy file for faster loading."""
         f = self.npy_files[i]
         if not f.exists():
-            np.save(f.as_posix(), cv2.imread(self.im_files[i]), allow_pickle=False)
+            np.save(f.as_posix(), cv2.imread(self.im_files[i], cv2.IMREAD_UNCHANGED))
 
     def check_cache_ram(self, safety_margin=0.5):
         """Check image caching requirements vs available memory."""
         b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
         n = min(self.ni, 30)  # extrapolate from 30 random images
         for _ in range(n):
-            im = cv2.imread(random.choice(self.im_files))  # sample image
+            im = cv2.imread(random.choice(self.im_files), cv2.IMREAD_UNCHANGED)  # sample image
             ratio = self.imgsz / max(im.shape[0], im.shape[1])  # max(h, w)  # ratio
             b += im.nbytes * ratio ** 2
         mem_required = b * self.ni / n * (1 + safety_margin)  # GB required to cache dataset into RAM
@@ -269,7 +268,8 @@ class BaseDataset(Dataset):
                 # Val transforms
                 return Compose([])
         """
-        raise NotImplementedError
+        return Compose([ToTensor()])
+        # raise NotImplementedError
 
     def get_labels(self):
         """Users can custom their own format here.

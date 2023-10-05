@@ -115,12 +115,12 @@ def check_source(source):
     if isinstance(source, (str, int, Path)):  # int for local usb camera
         source = str(source)
         is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
-        is_url = source.lower().startswith(('https://', 'http://', 'rtsp://', 'rtmp://', 'tcp://'))
+        is_url = source.lower().startswith(('https://', 'http://', 'rtsp://', 'rtmp://'))
         webcam = source.isnumeric() or source.endswith('.streams') or (is_url and not is_file)
         screenshot = source.lower() == 'screen'
         if is_url and is_file:
             source = check_file(source)  # download
-    elif isinstance(source, LOADERS):
+    elif isinstance(source, tuple(LOADERS)):
         in_memory = True
     elif isinstance(source, (list, tuple)):
         source = autocast_list(source)  # convert all list elements to PIL or np arrays
@@ -135,7 +135,7 @@ def check_source(source):
     return source, webcam, screenshot, from_img, in_memory, tensor
 
 
-def load_inference_source(source=None, imgsz=640, vid_stride=1, buffer=False):
+def load_inference_source(source=None, imgsz=640, vid_stride=1):
     """
     Loads an inference source for object detection and applies necessary transformations.
 
@@ -143,7 +143,6 @@ def load_inference_source(source=None, imgsz=640, vid_stride=1, buffer=False):
         source (str, Path, Tensor, PIL.Image, np.ndarray): The input source for inference.
         imgsz (int, optional): The size of the image for inference. Default is 640.
         vid_stride (int, optional): The frame interval for video sources. Default is 1.
-        buffer (bool, optional): Determined whether stream frames will be buffered. Default is False.
 
     Returns:
         dataset (Dataset): A dataset object for the specified input source.
@@ -157,7 +156,7 @@ def load_inference_source(source=None, imgsz=640, vid_stride=1, buffer=False):
     elif in_memory:
         dataset = source
     elif webcam:
-        dataset = LoadStreams(source, imgsz=imgsz, vid_stride=vid_stride, buffer=buffer)
+        dataset = LoadStreams(source, imgsz=imgsz, vid_stride=vid_stride)
     elif screenshot:
         dataset = LoadScreenshots(source, imgsz=imgsz)
     elif from_img:

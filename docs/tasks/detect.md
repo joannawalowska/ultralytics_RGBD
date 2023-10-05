@@ -4,24 +4,11 @@ description: Official documentation for YOLOv8 by Ultralytics. Learn how to trai
 keywords: YOLOv8, Ultralytics, object detection, pretrained models, training, validation, prediction, export models, COCO, ImageNet, PyTorch, ONNX, CoreML
 ---
 
-# Object Detection
+Object detection is a task that involves identifying the location and class of objects in an image or video stream.
 
 <img width="1024" src="https://user-images.githubusercontent.com/26833433/243418624-5785cb93-74c9-4541-9179-d5c6782d491a.png">
 
-Object detection is a task that involves identifying the location and class of objects in an image or video stream.
-
 The output of an object detector is a set of bounding boxes that enclose the objects in the image, along with class labels and confidence scores for each box. Object detection is a good choice when you need to identify objects of interest in a scene, but don't need to know exactly where the object is or its exact shape.
-
-<p align="center">
-  <br>
-  <iframe width="720" height="405" src="https://www.youtube.com/embed/5ku7npMrW40?si=6HQO1dDXunV8gekh" 
-    title="YouTube video player" frameborder="0" 
-    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
-    allowfullscreen>
-  </iframe>
-  <br>
-  <strong>Watch:</strong> Object Detection with Pre-trained Ultralytics YOLOv8 Model.
-</p>
 
 !!! tip "Tip"
 
@@ -54,20 +41,20 @@ Train YOLOv8n on the COCO128 dataset for 100 epochs at image size 640. For a ful
 !!! example ""
 
     === "Python"
-
+    
         ```python
         from ultralytics import YOLO
-
+        
         # Load a model
         model = YOLO('yolov8n.yaml')  # build a new model from YAML
         model = YOLO('yolov8n.pt')  # load a pretrained model (recommended for training)
         model = YOLO('yolov8n.yaml').load('yolov8n.pt')  # build from YAML and transfer weights
-
+        
         # Train the model
-        results = model.train(data='coco128.yaml', epochs=100, imgsz=640)
+        model.train(data='coco128.yaml', epochs=100, imgsz=640)
         ```
     === "CLI"
-
+    
         ```bash
         # Build a new model from YAML and start training from scratch
         yolo detect train data=coco128.yaml model=yolov8n.yaml epochs=100 imgsz=640
@@ -81,7 +68,7 @@ Train YOLOv8n on the COCO128 dataset for 100 epochs at image size 640. For a ful
 
 ### Dataset format
 
-YOLO detection dataset format can be found in detail in the [Dataset Guide](../datasets/detect/index.md). To convert your existing dataset from other formats (like COCO etc.) to YOLO format, please use [JSON2YOLO](https://github.com/ultralytics/JSON2YOLO) tool by Ultralytics.
+YOLO detection dataset format can be found in detail in the [Dataset Guide](../datasets/detect/index.md). To convert your existing dataset from other formats( like COCO etc.) to YOLO format, please use [json2yolo tool](https://github.com/ultralytics/JSON2YOLO) by Ultralytics.
 
 ## Val
 
@@ -90,14 +77,14 @@ Validate trained YOLOv8n model accuracy on the COCO128 dataset. No argument need
 !!! example ""
 
     === "Python"
-
+    
         ```python
         from ultralytics import YOLO
-
+        
         # Load a model
         model = YOLO('yolov8n.pt')  # load an official model
         model = YOLO('path/to/best.pt')  # load a custom model
-
+        
         # Validate the model
         metrics = model.val()  # no arguments needed, dataset and settings remembered
         metrics.box.map    # map50-95
@@ -106,7 +93,7 @@ Validate trained YOLOv8n model accuracy on the COCO128 dataset. No argument need
         metrics.box.maps   # a list contains map50-95 of each category
         ```
     === "CLI"
-
+    
         ```bash
         yolo detect val model=yolov8n.pt  # val official model
         yolo detect val model=path/to/best.pt  # val custom model
@@ -119,19 +106,19 @@ Use a trained YOLOv8n model to run predictions on images.
 !!! example ""
 
     === "Python"
-
+    
         ```python
         from ultralytics import YOLO
-
+        
         # Load a model
         model = YOLO('yolov8n.pt')  # load an official model
         model = YOLO('path/to/best.pt')  # load a custom model
-
+        
         # Predict with the model
         results = model('https://ultralytics.com/images/bus.jpg')  # predict on an image
         ```
     === "CLI"
-
+    
         ```bash
         yolo detect predict model=yolov8n.pt source='https://ultralytics.com/images/bus.jpg'  # predict with official model
         yolo detect predict model=path/to/best.pt source='https://ultralytics.com/images/bus.jpg'  # predict with custom model
@@ -146,19 +133,19 @@ Export a YOLOv8n model to a different format like ONNX, CoreML, etc.
 !!! example ""
 
     === "Python"
-
+    
         ```python
         from ultralytics import YOLO
-
+        
         # Load a model
         model = YOLO('yolov8n.pt')  # load an official model
         model = YOLO('path/to/best.pt')  # load a custom trained
-
+        
         # Export the model
         model.export(format='onnx')
         ```
     === "CLI"
-
+    
         ```bash
         yolo export model=yolov8n.pt format=onnx  # export official model
         yolo export model=path/to/best.pt format=onnx  # export custom trained model
@@ -173,7 +160,7 @@ Available YOLOv8 export formats are in the table below. You can predict or valid
 | [ONNX](https://onnx.ai/)                                           | `onnx`            | `yolov8n.onnx`            | ✅        | `imgsz`, `half`, `dynamic`, `simplify`, `opset`     |
 | [OpenVINO](https://docs.openvino.ai/latest/index.html)             | `openvino`        | `yolov8n_openvino_model/` | ✅        | `imgsz`, `half`                                     |
 | [TensorRT](https://developer.nvidia.com/tensorrt)                  | `engine`          | `yolov8n.engine`          | ✅        | `imgsz`, `half`, `dynamic`, `simplify`, `workspace` |
-| [CoreML](https://github.com/apple/coremltools)                     | `coreml`          | `yolov8n.mlpackage`       | ✅        | `imgsz`, `half`, `int8`, `nms`                      |
+| [CoreML](https://github.com/apple/coremltools)                     | `coreml`          | `yolov8n.mlmodel`         | ✅        | `imgsz`, `half`, `int8`, `nms`                      |
 | [TF SavedModel](https://www.tensorflow.org/guide/saved_model)      | `saved_model`     | `yolov8n_saved_model/`    | ✅        | `imgsz`, `keras`                                    |
 | [TF GraphDef](https://www.tensorflow.org/api_docs/python/tf/Graph) | `pb`              | `yolov8n.pb`              | ❌        | `imgsz`                                             |
 | [TF Lite](https://www.tensorflow.org/lite)                         | `tflite`          | `yolov8n.tflite`          | ✅        | `imgsz`, `half`, `int8`                             |

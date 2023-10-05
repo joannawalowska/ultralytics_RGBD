@@ -20,23 +20,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import yaml
-from tqdm import tqdm as tqdm_original
 
 from ultralytics import __version__
 
 # PyTorch Multi-GPU DDP Constants
 RANK = int(os.getenv('RANK', -1))
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
+WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
 
 # Other Constants
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLO
-ASSETS = ROOT / 'assets'  # default images
 DEFAULT_CFG_PATH = ROOT / 'cfg/default.yaml'
 NUM_THREADS = min(8, max(1, os.cpu_count() - 1))  # number of YOLOv5 multiprocessing threads
 AUTOINSTALL = str(os.getenv('YOLO_AUTOINSTALL', True)).lower() == 'true'  # global auto-install mode
 VERBOSE = str(os.getenv('YOLO_VERBOSE', True)).lower() == 'true'  # global verbose mode
-TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}' if VERBOSE else None  # tqdm bar format
+TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
 LOGGING_NAME = 'ultralytics'
 MACOS, LINUX, WINDOWS = (platform.system() == x for x in ['Darwin', 'Linux', 'Windows'])  # environment booleans
 ARM64 = platform.machine() in ('arm64', 'aarch64')  # ARM64 booleans
@@ -77,7 +76,7 @@ HELP_MSG = \
             yolo detect train data=coco128.yaml model=yolov8n.pt epochs=10 lr0=0.01
 
         - Predict a YouTube video using a pretrained segmentation model at image size 320:
-            yolo segment predict model=yolov8n-seg.pt source='https://youtu.be/LNwODJXcvt4' imgsz=320
+            yolo segment predict model=yolov8n-seg.pt source='https://youtu.be/Zgi9g1ksQHc' imgsz=320
 
         - Val a pretrained detection model at batch-size 1 and image size 640:
             yolo detect val model=yolov8n.pt data=coco128.yaml batch=1 imgsz=640
@@ -105,22 +104,6 @@ cv2.setNumThreads(0)  # prevent OpenCV from multithreading (incompatible with Py
 os.environ['NUMEXPR_MAX_THREADS'] = str(NUM_THREADS)  # NumExpr max threads
 os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'  # for deterministic training
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # suppress verbose TF compiler warnings in Colab
-
-
-class TQDM(tqdm_original):
-    """
-    Custom Ultralytics tqdm class with different default arguments.
-
-    Args:
-        *args (list): Positional arguments passed to original tqdm.
-        **kwargs (dict): Keyword arguments, with custom defaults applied.
-    """
-
-    def __init__(self, *args, **kwargs):
-        # Set new default values (these can still be overridden when calling TQDM)
-        kwargs['disable'] = not VERBOSE or kwargs.get('disable', False)  # logical 'and' with default value if passed
-        kwargs.setdefault('bar_format', TQDM_BAR_FORMAT)  # override default value if passed
-        super().__init__(*args, **kwargs)
 
 
 class SimpleClass:
@@ -186,7 +169,7 @@ def plt_settings(rcparams=None, backend='Agg'):
     """
     Decorator to temporarily set rc parameters and the backend for a plotting function.
 
-    Example:
+    Usage:
         decorator: @plt_settings({"font.size": 12})
         context manager: with plt_settings({"font.size": 12}):
 
@@ -208,16 +191,12 @@ def plt_settings(rcparams=None, backend='Agg'):
         def wrapper(*args, **kwargs):
             """Sets rc parameters and backend, calls the original function, and restores the settings."""
             original_backend = plt.get_backend()
-            if backend != original_backend:
-                plt.close('all')  # auto-close()ing of figures upon backend switching is deprecated since 3.8
-                plt.switch_backend(backend)
+            plt.switch_backend(backend)
 
             with plt.rc_context(rcparams):
                 result = func(*args, **kwargs)
 
-            if backend != original_backend:
-                plt.close('all')
-                plt.switch_backend(original_backend)
+            plt.switch_backend(original_backend)
             return result
 
         return wrapper
@@ -282,15 +261,11 @@ class ThreadingLocked:
     Attributes:
         lock (threading.Lock): A lock object used to manage access to the decorated function.
 
-    Example:
-        ```python
-        from ultralytics.utils import ThreadingLocked
-
+    Usage:
         @ThreadingLocked()
         def my_function():
             # Your code here
             pass
-        ```
     """
 
     def __init__(self):
@@ -307,14 +282,13 @@ class ThreadingLocked:
         return decorated
 
 
-def yaml_save(file='data.yaml', data=None, header=''):
+def yaml_save(file='data.yaml', data=None):
     """
     Save YAML data to a file.
 
     Args:
         file (str, optional): File name. Default is 'data.yaml'.
         data (dict): Data to save in YAML format.
-        header (str, optional): YAML header to add.
 
     Returns:
         (None): Data is saved to the specified file.
@@ -327,15 +301,12 @@ def yaml_save(file='data.yaml', data=None, header=''):
         file.parent.mkdir(parents=True, exist_ok=True)
 
     # Convert Path objects to strings
-    valid_types = int, float, str, bool, list, tuple, dict, type(None)
     for k, v in data.items():
-        if not isinstance(v, valid_types):
+        if isinstance(v, Path):
             data[k] = str(v)
 
     # Dump data to file in YAML format
-    with open(file, 'w', errors='ignore', encoding='utf-8') as f:
-        if header:
-            f.write(header)
+    with open(file, 'w') as f:
         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
 
 
@@ -350,7 +321,6 @@ def yaml_load(file='data.yaml', append_filename=False):
     Returns:
         (dict): YAML data and file name.
     """
-    assert Path(file).suffix in ('.yaml', '.yml'), f'Attempting to load non-YAML file {file} with yaml_load()'
     with open(file, errors='ignore', encoding='utf-8') as f:
         s = f.read()  # string
 
@@ -359,18 +329,15 @@ def yaml_load(file='data.yaml', append_filename=False):
             s = re.sub(r'[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uD7FF\uE000-\uFFFD\U00010000-\U0010ffff]+', '', s)
 
         # Add YAML filename to dict and return
-        data = yaml.safe_load(s) or {}  # always return a dict (yaml.safe_load() may return None for empty files)
-        if append_filename:
-            data['yaml_file'] = str(file)
-        return data
+        return {**yaml.safe_load(s), 'yaml_file': str(file)} if append_filename else yaml.safe_load(s)
 
 
 def yaml_print(yaml_file: Union[str, Path, dict]) -> None:
     """
-    Pretty prints a YAML file or a YAML-formatted dictionary.
+    Pretty prints a yaml file or a yaml-formatted dictionary.
 
     Args:
-        yaml_file: The file path of the YAML file or a YAML-formatted dictionary.
+        yaml_file: The file path of the yaml file or a yaml-formatted dictionary.
 
     Returns:
         None
@@ -387,19 +354,6 @@ for k, v in DEFAULT_CFG_DICT.items():
         DEFAULT_CFG_DICT[k] = None
 DEFAULT_CFG_KEYS = DEFAULT_CFG_DICT.keys()
 DEFAULT_CFG = IterableSimpleNamespace(**DEFAULT_CFG_DICT)
-
-
-def is_ubuntu() -> bool:
-    """
-    Check if the OS is Ubuntu.
-
-    Returns:
-        (bool): True if OS is Ubuntu, False otherwise.
-    """
-    with contextlib.suppress(FileNotFoundError):
-        with open('/etc/os-release') as f:
-            return 'ID=ubuntu' in f.read()
-    return False
 
 
 def is_colab():
@@ -549,6 +503,7 @@ def get_git_dir():
     for d in Path(__file__).parents:
         if (d / '.git').is_dir():
             return d
+    return None  # no .git dir found
 
 
 def get_git_origin_url():
@@ -556,12 +511,13 @@ def get_git_origin_url():
     Retrieves the origin URL of a git repository.
 
     Returns:
-        (str | None): The origin URL of the git repository or None if not git directory.
+        (str | None): The origin URL of the git repository.
     """
     if is_git_dir():
         with contextlib.suppress(subprocess.CalledProcessError):
             origin = subprocess.check_output(['git', 'config', '--get', 'remote.origin.url'])
             return origin.decode().strip()
+    return None  # if not git dir or on error
 
 
 def get_git_branch():
@@ -569,12 +525,13 @@ def get_git_branch():
     Returns the current git branch name. If not in a git repository, returns None.
 
     Returns:
-        (str | None): The current git branch name or None if not a git directory.
+        (str | None): The current git branch name.
     """
     if is_git_dir():
         with contextlib.suppress(subprocess.CalledProcessError):
             origin = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
             return origin.decode().strip()
+    return None  # if not git dir or on error
 
 
 def get_default_args(func):
@@ -588,19 +545,6 @@ def get_default_args(func):
     """
     signature = inspect.signature(func)
     return {k: v.default for k, v in signature.parameters.items() if v.default is not inspect.Parameter.empty}
-
-
-def get_ubuntu_version():
-    """
-    Retrieve the Ubuntu version if the OS is Ubuntu.
-
-    Returns:
-        (str): Ubuntu version or None if not an Ubuntu OS.
-    """
-    if is_ubuntu():
-        with contextlib.suppress(FileNotFoundError, AttributeError):
-            with open('/etc/os-release') as f:
-                return re.search(r'VERSION_ID="(\d+\.\d+)"', f.read())[1]
 
 
 def get_user_config_dir(sub_dir='Ultralytics'):
@@ -624,10 +568,9 @@ def get_user_config_dir(sub_dir='Ultralytics'):
         raise ValueError(f'Unsupported operating system: {platform.system()}')
 
     # GCP and AWS lambda fix, only /tmp is writeable
-    if not is_dir_writeable(path.parent):
-        LOGGER.warning(f"WARNING ⚠️ user config directory '{path}' is not writeable, defaulting to '/tmp' or CWD."
-                       'Alternatively you can define a YOLO_CONFIG_DIR environment variable for this path.')
-        path = Path('/tmp') / sub_dir if is_dir_writeable('/tmp') else Path().cwd() / sub_dir
+    if not is_dir_writeable(str(path.parent)):
+        path = Path('/tmp') / sub_dir
+        LOGGER.warning(f"WARNING ⚠️ user config directory is not writeable, defaulting to '{path}'.")
 
     # Create the subdirectory if it does not exist
     path.mkdir(parents=True, exist_ok=True)
@@ -635,38 +578,12 @@ def get_user_config_dir(sub_dir='Ultralytics'):
     return path
 
 
-USER_CONFIG_DIR = Path(os.getenv('YOLO_CONFIG_DIR') or get_user_config_dir())  # Ultralytics settings dir
+USER_CONFIG_DIR = Path(os.getenv('YOLO_CONFIG_DIR', get_user_config_dir()))  # Ultralytics settings dir
 SETTINGS_YAML = USER_CONFIG_DIR / 'settings.yaml'
 
 
 def colorstr(*input):
-    """
-    Colors a string based on the provided color and style arguments. Utilizes ANSI escape codes.
-    See https://en.wikipedia.org/wiki/ANSI_escape_code for more details.
-
-    This function can be called in two ways:
-        - colorstr('color', 'style', 'your string')
-        - colorstr('your string')
-
-    In the second form, 'blue' and 'bold' will be applied by default.
-
-    Args:
-        *input (str): A sequence of strings where the first n-1 strings are color and style arguments,
-                      and the last string is the one to be colored.
-
-    Supported Colors and Styles:
-        Basic Colors: 'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'
-        Bright Colors: 'bright_black', 'bright_red', 'bright_green', 'bright_yellow',
-                       'bright_blue', 'bright_magenta', 'bright_cyan', 'bright_white'
-        Misc: 'end', 'bold', 'underline'
-
-    Returns:
-        (str): The input string wrapped with ANSI escape codes for the specified color and style.
-
-    Examples:
-        >>> colorstr('blue', 'bold', 'hello world')
-        >>> '\033[34m\033[1mhello world\033[0m'
-    """
+    """Colors a string https://en.wikipedia.org/wiki/ANSI_escape_code, i.e.  colorstr('blue', 'hello world')."""
     *args, string = input if len(input) > 1 else ('blue', 'bold', input[0])  # color arguments, string
     colors = {
         'black': '\033[30m',  # basic colors
@@ -689,24 +606,6 @@ def colorstr(*input):
         'bold': '\033[1m',
         'underline': '\033[4m'}
     return ''.join(colors[x] for x in args) + f'{string}' + colors['end']
-
-
-def remove_colorstr(input_string):
-    """
-    Removes ANSI escape codes from a string, effectively un-coloring it.
-
-    Args:
-        input_string (str): The string to remove color and style from.
-
-    Returns:
-        (str): A new string with all ANSI escape codes removed.
-
-    Examples:
-        >>> remove_colorstr(colorstr('blue', 'bold', 'hello world'))
-        >>> 'hello world'
-    """
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    return ansi_escape.sub('', input_string)
 
 
 class TryExcept(contextlib.ContextDecorator):
@@ -814,82 +713,62 @@ def set_sentry():
             logging.getLogger(logger).setLevel(logging.CRITICAL)
 
 
-class SettingsManager(dict):
+def get_settings(file=SETTINGS_YAML, version='0.0.3'):
     """
-    Manages Ultralytics settings stored in a YAML file.
+    Loads a global Ultralytics settings YAML file or creates one with default values if it does not exist.
 
     Args:
-        file (str | Path): Path to the Ultralytics settings YAML file. Default is USER_CONFIG_DIR / 'settings.yaml'.
-        version (str): Settings version. In case of local version mismatch, new default settings will be saved.
+        file (Path): Path to the Ultralytics settings YAML file. Defaults to 'settings.yaml' in the USER_CONFIG_DIR.
+        version (str): Settings version. If min settings version not met, new default settings will be saved.
+
+    Returns:
+        (dict): Dictionary of settings key-value pairs.
     """
+    import hashlib
 
-    def __init__(self, file=SETTINGS_YAML, version='0.0.4'):
-        import copy
-        import hashlib
+    from ultralytics.utils.checks import check_version
+    from ultralytics.utils.torch_utils import torch_distributed_zero_first
 
-        from ultralytics.utils.checks import check_version
-        from ultralytics.utils.torch_utils import torch_distributed_zero_first
+    git_dir = get_git_dir()
+    root = git_dir or Path()
+    datasets_root = (root.parent if git_dir and is_dir_writeable(root.parent) else root).resolve()
+    defaults = {
+        'datasets_dir': str(datasets_root / 'datasets'),  # default datasets directory.
+        'weights_dir': str(root / 'weights'),  # default weights directory.
+        'runs_dir': str(root / 'runs'),  # default runs directory.
+        'uuid': hashlib.sha256(str(uuid.getnode()).encode()).hexdigest(),  # SHA-256 anonymized UUID hash
+        'sync': True,  # sync analytics to help with YOLO development
+        'api_key': '',  # Ultralytics HUB API key (https://hub.ultralytics.com/)
+        'settings_version': version}  # Ultralytics settings version
 
-        git_dir = get_git_dir()
-        root = git_dir or Path()
-        datasets_root = (root.parent if git_dir and is_dir_writeable(root.parent) else root).resolve()
+    with torch_distributed_zero_first(RANK):
+        if not file.exists():
+            yaml_save(file, defaults)
+        settings = yaml_load(file)
 
-        self.file = Path(file)
-        self.version = version
-        self.defaults = {
-            'settings_version': version,
-            'datasets_dir': str(datasets_root / 'datasets'),
-            'weights_dir': str(root / 'weights'),
-            'runs_dir': str(root / 'runs'),
-            'uuid': hashlib.sha256(str(uuid.getnode()).encode()).hexdigest(),
-            'sync': True,
-            'api_key': '',
-            'clearml': True,  # integrations
-            'comet': True,
-            'dvc': True,
-            'hub': True,
-            'mlflow': True,
-            'neptune': True,
-            'raytune': True,
-            'tensorboard': True,
-            'wandb': True}
+        # Check that settings keys and types match defaults
+        correct = \
+            settings \
+            and settings.keys() == defaults.keys() \
+            and all(type(a) == type(b) for a, b in zip(settings.values(), defaults.values())) \
+            and check_version(settings['settings_version'], version)
+        if not correct:
+            LOGGER.warning('WARNING ⚠️ Ultralytics settings reset to defaults. This is normal and may be due to a '
+                           'recent ultralytics package update, but may have overwritten previous settings. '
+                           f"\nView and update settings with 'yolo settings' or at '{file}'")
+            settings = defaults  # merge **defaults with **settings (prefer **settings)
+            yaml_save(file, settings)  # save updated defaults
 
-        super().__init__(copy.deepcopy(self.defaults))
+        return settings
 
-        with torch_distributed_zero_first(RANK):
-            if not self.file.exists():
-                self.save()
 
-            self.load()
-            correct_keys = self.keys() == self.defaults.keys()
-            correct_types = all(type(a) is type(b) for a, b in zip(self.values(), self.defaults.values()))
-            correct_version = check_version(self['settings_version'], self.version)
-            if not (correct_keys and correct_types and correct_version):
-                LOGGER.warning(
-                    'WARNING ⚠️ Ultralytics settings reset to default values. This may be due to a possible problem '
-                    'with your settings or a recent ultralytics package update. '
-                    f"\nView settings with 'yolo settings' or at '{self.file}'"
-                    "\nUpdate settings with 'yolo settings key=value', i.e. 'yolo settings runs_dir=path/to/dir'.")
-                self.reset()
-
-    def load(self):
-        """Loads settings from the YAML file."""
-        super().update(yaml_load(self.file))
-
-    def save(self):
-        """Saves the current settings to the YAML file."""
-        yaml_save(self.file, dict(self))
-
-    def update(self, *args, **kwargs):
-        """Updates a setting value in the current settings."""
-        super().update(*args, **kwargs)
-        self.save()
-
-    def reset(self):
-        """Resets the settings to default and saves them."""
-        self.clear()
-        self.update(self.defaults)
-        self.save()
+def set_settings(kwargs, file=SETTINGS_YAML):
+    """
+    Function that runs on a first-time ultralytics package installation to set up global settings and create necessary
+    directories.
+    """
+    SETTINGS.update(kwargs)
+    yaml_save(file, SETTINGS)
 
 
 def deprecation_warn(arg, new_arg, version=None):
@@ -902,7 +781,7 @@ def deprecation_warn(arg, new_arg, version=None):
 
 def clean_url(url):
     """Strip auth from URL, i.e. https://url.com/file.txt?auth -> https://url.com/file.txt."""
-    url = Path(url).as_posix().replace(':/', '://')  # Pathlib turns :// -> :/, as_posix() for Windows
+    url = str(Path(url)).replace(':/', '://')  # Pathlib turns :// -> :/
     return urllib.parse.unquote(url).split('?')[0]  # '%2F' to '/', split https://url.com/file.txt?auth
 
 
@@ -915,18 +794,16 @@ def url2file(url):
 
 # Check first-install steps
 PREFIX = colorstr('Ultralytics: ')
-SETTINGS = SettingsManager()  # initialize settings
+SETTINGS = get_settings()
 DATASETS_DIR = Path(SETTINGS['datasets_dir'])  # global datasets directory
-WEIGHTS_DIR = Path(SETTINGS['weights_dir'])
 ENVIRONMENT = 'Colab' if is_colab() else 'Kaggle' if is_kaggle() else 'Jupyter' if is_jupyter() else \
     'Docker' if is_docker() else platform.system()
 TESTS_RUNNING = is_pytest_running() or is_github_actions_ci()
 set_sentry()
 
-# Apply monkey patches
-from .patches import imread, imshow, imwrite, torch_save
+# Apply monkey patches if the script is being run from within the parent directory of the script's location
+from .patches import imread, imshow, imwrite
 
-torch.save = torch_save
-if WINDOWS:
-    # Apply cv2 patches for non-ASCII and non-UTF characters in image paths
+# torch.save = torch_save
+if Path(inspect.stack()[0].filename).parent.parent.as_posix() in inspect.stack()[-1].filename:
     cv2.imread, cv2.imwrite, cv2.imshow = imread, imwrite, imshow

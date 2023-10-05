@@ -1,19 +1,22 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 
+from pathlib import Path
+
 from ultralytics import YOLO
 from ultralytics.cfg import get_cfg
 from ultralytics.engine.exporter import Exporter
 from ultralytics.models.yolo import classify, detect, segment
-from ultralytics.utils import ASSETS, DEFAULT_CFG, WEIGHTS_DIR
+from ultralytics.utils import DEFAULT_CFG, ROOT, SETTINGS
 
 CFG_DET = 'yolov8n.yaml'
 CFG_SEG = 'yolov8n-seg.yaml'
-CFG_CLS = 'yolov8n-cls.yaml'  # or 'squeezenet1_0'
+CFG_CLS = 'squeezenet1_0'
 CFG = get_cfg(DEFAULT_CFG)
-MODEL = WEIGHTS_DIR / 'yolov8n'
+MODEL = Path(SETTINGS['weights_dir']) / 'yolov8n'
+SOURCE = ROOT / 'assets'
 
 
-def test_func(*args):  # noqa
+def test_func(model=None):
     print('callback test passed')
 
 
@@ -22,13 +25,12 @@ def test_export():
     exporter.add_callback('on_export_start', test_func)
     assert test_func in exporter.callbacks['on_export_start'], 'callback test failed'
     f = exporter(model=YOLO(CFG_DET).model)
-    YOLO(f)(ASSETS)  # exported model inference
+    YOLO(f)(SOURCE)  # exported model inference
 
 
 def test_detect():
     overrides = {'data': 'coco8.yaml', 'model': CFG_DET, 'imgsz': 32, 'epochs': 1, 'save': False}
     CFG.data = 'coco8.yaml'
-    CFG.imgsz = 32
 
     # Trainer
     trainer = detect.DetectionTrainer(overrides=overrides)
@@ -46,7 +48,7 @@ def test_detect():
     pred = detect.DetectionPredictor(overrides={'imgsz': [64, 64]})
     pred.add_callback('on_predict_start', test_func)
     assert test_func in pred.callbacks['on_predict_start'], 'callback test failed'
-    result = pred(source=ASSETS, model=f'{MODEL}.pt')
+    result = pred(source=SOURCE, model=f'{MODEL}.pt')
     assert len(result), 'predictor test failed'
 
     overrides['resume'] = trainer.last
@@ -63,7 +65,6 @@ def test_detect():
 def test_segment():
     overrides = {'data': 'coco8-seg.yaml', 'model': CFG_SEG, 'imgsz': 32, 'epochs': 1, 'save': False}
     CFG.data = 'coco8-seg.yaml'
-    CFG.imgsz = 32
     # YOLO(CFG_SEG).train(**overrides)  # works
 
     # trainer
@@ -82,7 +83,7 @@ def test_segment():
     pred = segment.SegmentationPredictor(overrides={'imgsz': [64, 64]})
     pred.add_callback('on_predict_start', test_func)
     assert test_func in pred.callbacks['on_predict_start'], 'callback test failed'
-    result = pred(source=ASSETS, model=f'{MODEL}-seg.pt')
+    result = pred(source=SOURCE, model=f'{MODEL}-seg.pt')
     assert len(result), 'predictor test failed'
 
     # Test resume
@@ -98,7 +99,7 @@ def test_segment():
 
 
 def test_classify():
-    overrides = {'data': 'imagenet10', 'model': CFG_CLS, 'imgsz': 32, 'epochs': 1, 'save': False}
+    overrides = {'data': 'imagenet10', 'model': 'yolov8n-cls.yaml', 'imgsz': 32, 'epochs': 1, 'save': False}
     CFG.data = 'imagenet10'
     CFG.imgsz = 32
     # YOLO(CFG_SEG).train(**overrides)  # works
@@ -119,5 +120,5 @@ def test_classify():
     pred = classify.ClassificationPredictor(overrides={'imgsz': [64, 64]})
     pred.add_callback('on_predict_start', test_func)
     assert test_func in pred.callbacks['on_predict_start'], 'callback test failed'
-    result = pred(source=ASSETS, model=trainer.best)
+    result = pred(source=SOURCE, model=trainer.best)
     assert len(result), 'predictor test failed'

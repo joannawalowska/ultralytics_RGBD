@@ -10,7 +10,9 @@ keywords: Ultralytics, YOLO, pose estimation, datasets, training, YAML, keypoint
 
 ### Ultralytics YOLO format
 
-The dataset label format used for training YOLO pose models is as follows:
+** Label Format **
+
+The dataset format used for training YOLO pose models is as follows:
 
 1. One text file per image: Each image in the dataset has a corresponding text file with the same name as the image file and the ".txt" extension.
 2. One row per object: Each row in the text file corresponds to one object instance in the image.
@@ -60,25 +62,26 @@ The `train` and `val` fields specify the paths to the directories containing the
 
 `names` is a dictionary of class names. The order of the names should match the order of the object class indices in the YOLO dataset files.
 
-(Optional) if the points are symmetric then need flip_idx, like left-right side of human or face. For example if we assume five keypoints of facial landmark: [left eye, right eye, nose, left mouth, right mouth], and the original index is [0, 1, 2, 3, 4], then flip_idx is [1, 0, 2, 4, 3] (just exchange the left-right index, i.e 0-1 and 3-4, and do not modify others like nose in this example).
+(Optional) if the points are symmetric then need flip_idx, like left-right side of human or face.
+For example if we assume five keypoints of facial landmark: [left eye, right eye, nose, left mouth, right mouth], and the original index is [0, 1, 2, 3, 4], then flip_idx is [1, 0, 2, 4, 3] (just exchange the left-right index, i.e 0-1 and 3-4, and do not modify others like nose in this example).
 
 ## Usage
 
 !!! example ""
 
     === "Python"
-
+    
         ```python
         from ultralytics import YOLO
-
+        
         # Load a model
         model = YOLO('yolov8n-pose.pt')  # load a pretrained model (recommended for training)
 
         # Train the model
-        results = model.train(data='coco128-pose.yaml', epochs=100, imgsz=640)
+        model.train(data='coco128-pose.yaml', epochs=100, imgsz=640)
         ```
     === "CLI"
-
+    
         ```bash
         # Start training from a pretrained *.pt model
         yolo detect train data=coco128-pose.yaml model=yolov8n-pose.pt epochs=100 imgsz=640
@@ -108,15 +111,6 @@ This section outlines the datasets that are compatible with Ultralytics YOLO for
 - **Additional Notes**: COCO8-Pose is ideal for sanity checks and CI checks.
 - [Read more about COCO8-Pose](./coco8-pose.md)
 
-### Tiger-Pose
-
-- **Description**: [Ultralytics](https://ultralytics.com) This animal pose dataset comprises 263 images sourced from a [YouTube Video](https://www.youtube.com/watch?v=MIBAT6BGE6U&pp=ygUbVGlnZXIgd2Fsa2luZyByZWZlcmVuY2UubXA0), with 210 images allocated for training and 53 for validation.
-- **Label Format**: Same as Ultralytics YOLO format as described above, with 12 keypoints for animal pose and no visible dimension.
-- **Number of Classes**: 1 (Tiger).
-- **Keypoints**: 12 keypoints.
-- **Usage**: Great for animal pose or any other pose that is not human-based.
-- [Read more about Tiger-Pose](./tiger-pose.md)
-
 ### Adding your own dataset
 
 If you have your own dataset and would like to use it for training pose estimation models with Ultralytics YOLO format, ensure that it follows the format specified above under "Ultralytics YOLO format". Convert your annotations to the required format and specify the paths, number of classes, and class names in the YAML configuration file.
@@ -125,14 +119,10 @@ If you have your own dataset and would like to use it for training pose estimati
 
 Ultralytics provides a convenient conversion tool to convert labels from the popular COCO dataset format to YOLO format:
 
-!!! example ""
+```python
+from ultralytics.data.converter import convert_coco
 
-    === "Python"
-
-        ```python
-        from ultralytics.data.converter import convert_coco
-        
-        convert_coco(labels_dir='path/to/coco/annotations/', use_keypoints=True)
-        ```
+convert_coco(labels_dir='../coco/annotations/', use_keypoints=True)
+```
 
 This conversion tool can be used to convert the COCO dataset or any dataset in the COCO format to the Ultralytics YOLO format. The `use_keypoints` parameter specifies whether to include keypoints (for pose estimation) in the converted labels.
