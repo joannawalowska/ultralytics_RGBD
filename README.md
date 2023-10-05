@@ -1,3 +1,8 @@
+# Modifications
+The repository allows the user to work with RGBD data. This means that it is possible to learn YOLOv8 using 4-channel images. 
+First, download the repository and install it using the Git install instructions https://docs.ultralytics.com/quickstart/. Remember to change the .git link to this repo. Use yolo_4chan.yaml as the configuration file to create the model.
+
+# Base ultralytics description
 <div align="center">
   <p>
     <a href="https://ultralytics.com/yolov8" target="_blank">
